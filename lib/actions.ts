@@ -27,8 +27,57 @@ export async function saveQuizToDB(quizData: {
     });
 
     const saved = await newQuiz.save();
-    return sanitize(saved);
+
+    // Manually construct plain object to avoid serialization issues with nested _id
+    return {
+        id: saved._id.toString(),
+        title: saved.title,
+        topic: saved.topic,
+        difficulty: saved.difficulty,
+        questions: saved.questions.map((q: any) => ({
+            id: q._id ? q._id.toString() : (q.id || Math.random().toString()),
+            question: q.question,
+            options: Array.isArray(q.options) ? q.options.map((o: any) => String(o)) : [],
+            answer: String(q.answer)
+        })),
+        createdAt: saved.createdAt.toISOString()
+    };
 }
+
+export async function updateQuizInDB(quizId: string, data: {
+    title: string;
+    questions: Question[];
+}) {
+    await connectToDatabase();
+
+    const updatedQuiz = await Quiz.findByIdAndUpdate(
+        quizId,
+        {
+            title: data.title,
+            questions: data.questions,
+        },
+        { new: true }
+    );
+
+    if (!updatedQuiz) {
+        throw new Error("Quiz not found");
+    }
+
+    return {
+        id: updatedQuiz._id.toString(),
+        title: updatedQuiz.title,
+        topic: updatedQuiz.topic,
+        difficulty: updatedQuiz.difficulty,
+        questions: updatedQuiz.questions.map((q: any) => ({
+            id: q._id ? q._id.toString() : (q.id || Math.random().toString()),
+            question: q.question,
+            options: Array.isArray(q.options) ? q.options.map((o: any) => String(o)) : [],
+            answer: String(q.answer)
+        })),
+        createdAt: updatedQuiz.createdAt.toISOString()
+    };
+}
+
 
 export async function getQuizzesFromDB() {
     await connectToDatabase();
@@ -41,7 +90,12 @@ export async function getQuizzesFromDB() {
         title: q.title,
         topic: q.topic,
         date: q.createdAt.toISOString(),
-        questions: q.questions,
+        questions: q.questions ? q.questions.map((qn: any) => ({
+            id: qn.id || qn._id?.toString(),
+            question: qn.question,
+            options: Array.isArray(qn.options) ? qn.options.map((o: any) => String(o)) : [],
+            answer: String(qn.answer)
+        })) : [],
     }));
 }
 
@@ -58,10 +112,10 @@ export async function getQuizFromDB(id: string) {
             topic: quiz.topic,
             date: quiz.createdAt.toISOString(),
             questions: quiz.questions.map((q: any) => ({
-                id: q.id,
+                id: q.id || q._id?.toString() || Math.random().toString(), // Ensure ID is string
                 question: q.question,
-                options: [...q.options], // Ensure plain array
-                answer: q.answer
+                options: Array.isArray(q.options) ? q.options.map((opt: any) => String(opt)) : [],
+                answer: String(q.answer)
             })),
         };
     } catch (error) {

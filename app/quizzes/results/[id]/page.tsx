@@ -10,6 +10,7 @@ import { useRouter } from "next/navigation"
 import { analyzeQuizResultAction, QuizAnalysis, Question } from "@/lib/gemini"
 import { toast } from "sonner"
 import { motion } from "framer-motion"
+import ReactMarkdown from 'react-markdown'
 
 export default function ResultsPage({ params }: { params: Promise<{ id: string }> }) {
     const unwrappedParams = use(params)
@@ -21,6 +22,7 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
     const [questions, setQuestions] = useState<Question[]>([])
     const [answers, setAnswers] = useState<Record<number, number>>({})
     const [analysis, setAnalysis] = useState<QuizAnalysis | null>(null)
+    const [interactiveFlashcards, setInteractiveFlashcards] = useState<any[]>([])
 
     // Load Data
     useEffect(() => {
@@ -28,6 +30,7 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
             try {
                 const qStr = localStorage.getItem("quizResults_questions");
                 const aStr = localStorage.getItem("quizResults_answers");
+                const fcStr = localStorage.getItem("flashcard_queue");
 
                 if (!qStr || !aStr) {
                     toast.error("No results found. Redirecting...");
@@ -37,13 +40,15 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
 
                 const qs: Question[] = JSON.parse(qStr);
                 const as: Record<number, number> = JSON.parse(aStr);
+                const ifc = fcStr ? JSON.parse(fcStr) : [];
 
                 setQuestions(qs);
                 setAnswers(as);
+                setInteractiveFlashcards(ifc);
                 setLoading(false);
 
                 // Trigger AI Analysis
-                analyzeResults(qs, as);
+                analyzeResults(qs, as, ifc);
 
             } catch (e) {
                 console.error("Failed to load results", e);
@@ -53,7 +58,7 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
         loadResults();
     }, []);
 
-    const analyzeResults = async (qs: Question[], as: Record<number, number>) => {
+    const analyzeResults = async (qs: Question[], as: Record<number, number>, interactiveCards: any[]) => {
         try {
             // Convert index answers to string answers for AI context
             const userAnswersContext: Record<number, string> = {};
@@ -64,20 +69,62 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
             });
 
             const result = await analyzeQuizResultAction(qs, userAnswersContext);
-            setAnalysis(result);
+
+            // Merge interactive flashcards with AI flashcards
+            // Avoid duplicates based on Front text
+            const combinedFlashcards = [...interactiveCards];
+            result.flashcards.forEach(aiCard => {
+                if (!combinedFlashcards.some(existing => existing.front === aiCard.front)) {
+                    combinedFlashcards.push(aiCard);
+                }
+            });
+
+            setAnalysis({ ...result, flashcards: combinedFlashcards });
         } catch (error) {
             console.error(error);
             toast.error("AI Analysis failed.");
+            // Fallback: show interactive cards if AI fails
+            if (interactiveCards.length > 0) {
+                setAnalysis({
+                    score: 0, // Should be calculated locally if AI fails, but for now 0
+                    total: qs.length,
+                    feedback: "AI Analysis unavailable. Review your interactive flashcards below.",
+                    flashcards: interactiveCards
+                } as any)
+            }
         } finally {
             setAnalysisLoading(false);
         }
     };
 
-    const handleSaveFlashcards = () => {
-        // In a real app, save to DB. Here we append to local storage or just navigate.
-        // We'll update the Flashcards page next to read from a global store, but for now just mock navigate.
-        toast.success("Flashcards added to deck!");
-        router.push("/flashcards");
+    // ... rest of component ...
+
+    // Update Question Review Map to use ReactMarkdown
+    /*
+        Inside rendering:
+        <ReactMarkdown>{q.question}</ReactMarkdown>
+    */
+
+    const handleSaveFlashcards = async () => {
+        if (!analysis || analysis.flashcards.length === 0) return;
+
+        const toastId = toast.loading("Saving flashcards...");
+        try {
+            // Import save function dynamically or strictly
+            const { saveFlashcardsToDB } = await import("@/lib/actions");
+            await saveFlashcardsToDB({
+                topic: (analysis.flashcards[0] as any)?.topic || "Quiz Review", // Use topic from first card or default
+                cards: analysis.flashcards
+            });
+            toast.success("Flashcards saved deck!", { id: toastId });
+            router.push("/flashcards");
+
+            // Clear queue
+            localStorage.removeItem("flashcard_queue");
+        } catch (e) {
+            console.error(e);
+            toast.error("Failed to save flashcards", { id: toastId });
+        }
     };
 
     if (loading) return <div className="flex h-screen items-center justify-center"><Loader2 className="animate-spin h-8 w-8 text-primary" /></div>;
@@ -86,7 +133,7 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
 
     return (
         <div className="max-w-4xl mx-auto p-6 space-y-8 animate-in fade-in duration-500">
-            {/* Header / Score */}
+            {/* ... Header and Score Cards ... */}
             <div className="text-center space-y-4">
                 <motion.div
                     initial={{ scale: 0.8, opacity: 0 }}
@@ -104,7 +151,7 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 {/* Score Card */}
                 <Card className="flex flex-col items-center justify-center p-8 border-primary/20 shadow-lg bg-card relative overflow-hidden group hover:shadow-xl transition-all">
-                    <div className="absolute inset-0 bg-primary/5 opacity-0 group-hover:opacity-100 transition-opacity" />
+                    {/* ... Same Score Card Content ... */}
                     <CardHeader className="pb-2 relative z-10">
                         <CardTitle className="text-muted-foreground uppercase text-sm font-bold tracking-wider">Your Score</CardTitle>
                     </CardHeader>
@@ -126,6 +173,7 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
 
                 {/* AI Feedback Card */}
                 <Card className="flex flex-col justify-center border-l-4 border-l-yellow-500 shadow-md bg-card">
+                    {/* ... Same Feedback Content ... */}
                     <CardHeader className="pb-2">
                         <CardTitle className="flex items-center gap-2 text-lg">
                             <Sparkles className="h-5 w-5 text-yellow-500" />
@@ -171,7 +219,9 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
                                     <div className="flex items-start gap-3">
                                         {isCorrect ? <CheckCircle2 className="h-5 w-5 text-green-500 shrink-0 mt-0.5" /> : <XCircle className="h-5 w-5 text-red-500 shrink-0 mt-0.5" />}
                                         <div className="space-y-2 flex-1">
-                                            <p className="font-medium">{q.question}</p>
+                                            <div className="font-medium prose dark:prose-invert max-w-none">
+                                                <ReactMarkdown>{q.question}</ReactMarkdown>
+                                            </div>
                                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm mt-3">
                                                 <div className="bg-muted/50 p-2 rounded border">
                                                     <span className="text-xs text-muted-foreground block mb-1">Your Answer</span>
@@ -212,15 +262,15 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
                         </div>
                         <h2 className="text-2xl font-bold">Turn Mistakes into Mastery</h2>
                         <p className="text-muted-foreground max-w-lg mx-auto">
-                            Gemini has identified {analysis.flashcards.length} key concepts you struggled with.
-                            Add them to your flashcard deck for spaced repetition review.
+                            We have identified {analysis.flashcards.length} key concepts to review.
+                            {interactiveFlashcards.length > 0 && ` (${interactiveFlashcards.length} from interactive mode)`}
                         </p>
 
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-left max-w-2xl mx-auto mb-6">
                             {analysis.flashcards.slice(0, 2).map((fc, i) => (
                                 <div key={i} className="bg-background border rounded-lg p-3 text-sm shadow-sm opacity-80">
                                     <span className="font-semibold block mb-1 text-xs uppercase tracking-wide text-primary">Front</span>
-                                    {fc.front}
+                                    <ReactMarkdown>{fc.front}</ReactMarkdown>
                                 </div>
                             ))}
                             {analysis.flashcards.length > 2 && (
@@ -230,8 +280,8 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
                             )}
                         </div>
 
-                        <Button size="lg" onClick={handleSaveFlashcards} className="rounded-full shadow-lg shadow-primary/20">
-                            Save {analysis.flashcards.length} Flashcards <ArrowRight className="ml-2 h-4 w-4" />
+                        <Button size="lg" onClick={handleSaveFlashcards} disabled={analysisLoading} className="rounded-full shadow-lg shadow-primary/20">
+                            {analysisLoading ? <Loader2 className="animate-spin mr-2" /> : "Save Flashcards"} <ArrowRight className="ml-2 h-4 w-4" />
                         </Button>
                     </div>
                 </motion.div>

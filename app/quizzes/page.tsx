@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Clock, BookOpen, Search, Play, MoreVertical } from "lucide-react"
+import { Clock, BookOpen, Search, Play, MoreVertical, Edit } from "lucide-react"
 import Link from "next/link"
 
 // Imports already handled above
@@ -83,11 +83,15 @@ export default async function QuizzesPage({ searchParams }: QuizzesPageProps) {
                                             </div>
                                         </div>
                                     </CardContent>
-                                    <CardFooter>
-                                        <Button className="w-full" asChild>
+                                    <CardFooter className="flex gap-2">
+                                        <Button className="flex-1" asChild>
                                             <Link href={`/quizzes/play/${quiz.id}`}>
-                                                Start Quiz
-                                                <Play className="ml-2 h-4 w-4" />
+                                                Start <Play className="ml-2 h-4 w-4" />
+                                            </Link>
+                                        </Button>
+                                        <Button variant="outline" size="icon" asChild title="Edit Quiz">
+                                            <Link href={`/quizzes/edit/${quiz.id}`}>
+                                                <Edit className="h-4 w-4" />
                                             </Link>
                                         </Button>
                                     </CardFooter>

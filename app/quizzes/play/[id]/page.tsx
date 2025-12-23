@@ -8,13 +8,14 @@ import { Badge } from "@/components/ui/badge"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Label } from "@/components/ui/label"
 import { Separator } from "@/components/ui/separator"
-import { Flag, ChevronLeft, ChevronRight, Clock, CheckCircle, AlertCircle, LayoutGrid, List } from "lucide-react"
+import { Flag, ChevronLeft, ChevronRight, Clock, CheckCircle, AlertCircle, LayoutGrid, List, Zap, ZapOff, Flame, Plus } from "lucide-react"
+import { motion, AnimatePresence } from "framer-motion"
 import { toast } from "sonner"
 import { useRouter } from "next/navigation"
 import { Question } from "@/lib/gemini"
 import { getQuizFromDB, saveQuizResultToDB } from "@/lib/actions"
-import ReactMarkdown from 'react-markdown' // Render breakdown
-// import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter' // Can add syntax highlight later if needed, lightweight for now
+import ReactMarkdown from 'react-markdown'
+import { Switch } from "@/components/ui/switch"
 
 export default function QuizPlayPage({ params }: { params: Promise<{ id: string }> }) {
     const unwrappedParams = use(params)
@@ -30,6 +31,13 @@ export default function QuizPlayPage({ params }: { params: Promise<{ id: string 
     const [answers, setAnswers] = useState<Record<number, number>>({})
     const [flagged, setFlagged] = useState<number[]>([])
     const [visited, setVisited] = useState<number[]>([1]) // Track visited questions, start with first
+
+    // Interactive Mode State
+    const [interactiveMode, setInteractiveMode] = useState(false)
+    const [flashcardQueue, setFlashcardQueue] = useState<any[]>([])
+    const [instantFeedback, setInstantFeedback] = useState<{ isCorrect: boolean, correctAnswer?: string } | null>(null)
+    const [streak, setStreak] = useState(0)
+    const [showGhost, setShowGhost] = useState(false)
 
     // Metadata
     const [timeLeft, setTimeLeft] = useState(600) // 10 minutes default
@@ -97,6 +105,8 @@ export default function QuizPlayPage({ params }: { params: Promise<{ id: string 
             if (!visited.includes(currentId)) {
                 setVisited(prev => [...prev, currentId]);
             }
+            // Reset instant feedback on new question
+            setInstantFeedback(null);
         }
     }, [currentQIndex, quizQuestions, visited]);
 
@@ -108,8 +118,44 @@ export default function QuizPlayPage({ params }: { params: Promise<{ id: string 
 
     const handleOptionSelect = (value: string) => {
         if (!quizQuestions) return;
+
+        // If interactive mode is on and already answered correctly, prevent changing? 
+        // Or if handled, just let them change. 
+        // For simple interactive mode: ONE try.
+        if (interactiveMode && instantFeedback) return; // Prevent changing after feedback
+
         const currentQ = quizQuestions[currentQIndex];
-        setAnswers(prev => ({ ...prev, [currentQ.id]: parseInt(value) }))
+        const selectedIdx = parseInt(value);
+        setAnswers(prev => ({ ...prev, [currentQ.id]: selectedIdx }))
+
+        if (interactiveMode) {
+            const selectedOption = currentQ.options[selectedIdx];
+            const isCorrect = selectedOption === currentQ.answer;
+
+            setInstantFeedback({
+                isCorrect,
+                correctAnswer: isCorrect ? undefined : currentQ.answer
+            });
+
+            if (isCorrect) {
+                setStreak(prev => prev + 1);
+                toast.success("Correct!", { duration: 1500 });
+            } else {
+                setStreak(0);
+                // Trigger Ghost Box
+                setShowGhost(true);
+                setTimeout(() => setShowGhost(false), 2500);
+
+                // Auto-add to flashcard queue
+                if (!flashcardQueue.some(fc => fc.front === currentQ.question)) {
+                    setFlashcardQueue(prev => [...prev, {
+                        front: currentQ.question,
+                        back: currentQ.answer,
+                        topic: "Incorrect Answer"
+                    }])
+                }
+            }
+        }
     }
 
     const handleNext = () => {
@@ -140,12 +186,6 @@ export default function QuizPlayPage({ params }: { params: Promise<{ id: string 
         if (quizQuestions) {
             quizQuestions.forEach((q) => {
                 const userAnsIndex = answers[q.id];
-                // Assuming q.answer is the text content, we need to compare properly.
-                // Wait, in this file: 
-                // q.answer is the STRING answer.
-                // answers[q.id] is the INDEX number.
-                // We need to compare q.options[answers[q.id]] === q.answer
-
                 const userAnsText = q.options && userAnsIndex !== undefined ? q.options[userAnsIndex] : "Skipped";
 
                 if (userAnsText === q.answer) {
@@ -161,23 +201,11 @@ export default function QuizPlayPage({ params }: { params: Promise<{ id: string 
 
             // Save Result to DB
             try {
-                // We need the quiz ID and Topic. 
-                // Currently quizQuestions doesn't store the metadata (topic, quizId) directly inside the array.
-                // We fetched 'quiz' in useEffect but didn't store the full object, only quiz.questions.
-                // We need to store the full quiz object or at least topic/id in state.
-                // Let's rely on 'unwrappedParams.id' for ID. Topic is missing.
-                // We should update the state to store 'quizMetadata'.
-
-                // For now, let's just save what we have. If topic matches 'custom', we can't save effectively.
-                // If it's a DB quiz, we have ID.
                 const quizId = unwrappedParams.id;
                 if (quizId !== 'custom') {
-                    // We need to refetch or store topic. 
-                    // Let's assume for now we can't get topic without refetch or state change. 
-                    // Actually, let's just pass "Unknown" or Try to store it.
                     await saveQuizResultToDB({
                         quizId: quizId,
-                        topic: "General", // Placeholder until we fix state
+                        topic: "General", // Placeholder
                         score: score,
                         totalQuestions: quizQuestions.length,
                         wrongAnswers: wrongAnswers
@@ -190,6 +218,11 @@ export default function QuizPlayPage({ params }: { params: Promise<{ id: string 
             } catch (error) {
                 console.error("Failed to save results", error);
             }
+        }
+
+        // Save flashcard queue to local storage so Results page can pick it up or Flashcards page
+        if (flashcardQueue.length > 0) {
+            localStorage.setItem("flashcard_queue", JSON.stringify(flashcardQueue));
         }
 
         // Save answers to local storage (legacy path for results page)
@@ -247,7 +280,29 @@ export default function QuizPlayPage({ params }: { params: Promise<{ id: string 
                     <h1 className="text-2xl font-bold tracking-tight">Quiz Session</h1>
                     <p className="text-sm text-muted-foreground">Focus and do your best.</p>
                 </div>
+
+                {/* Interactive Mode Toggle */}
+                <div className="flex items-center gap-2 bg-muted/50 p-2 rounded-lg border">
+                    <Switch
+                        checked={interactiveMode}
+                        onCheckedChange={setInteractiveMode}
+                        id="interactive-mode"
+                    />
+                    <Label htmlFor="interactive-mode" className="cursor-pointer flex items-center gap-2 text-sm font-medium">
+                        {interactiveMode ? <Zap className="h-4 w-4 text-yellow-500 fill-current" /> : <ZapOff className="h-4 w-4 text-muted-foreground" />}
+                        Interactive Mode
+                    </Label>
+                </div>
+
                 <div className="flex items-center gap-4 w-full md:w-auto">
+                    {/* Streak Counter */}
+                    {interactiveMode && streak > 1 && (
+                        <div className="hidden md:flex items-center gap-2 px-3 py-1 bg-orange-500/10 text-orange-600 dark:text-orange-400 rounded-full border border-orange-500/20 animate-in fade-in slide-in-from-top-1">
+                            <Flame className="h-4 w-4 fill-current" />
+                            <span className="font-bold text-sm">{streak} Streak!</span>
+                        </div>
+                    )}
+
                     <Card className="flex-1 md:w-48 flex items-center justify-center py-2 px-4 shadow-sm border-primary/20">
                         <div className={`flex items-center text-xl font-bold font-mono transition-colors ${timeLeft < 60 ? "text-destructive animate-pulse" : "text-primary"}`}>
                             <Clock className="mr-2 h-5 w-5" />
@@ -312,25 +367,81 @@ export default function QuizPlayPage({ params }: { params: Promise<{ id: string 
                                 value={answers[currentQ.id]?.toString()}
                                 onValueChange={handleOptionSelect}
                                 className="space-y-3 pt-2"
+                                disabled={interactiveMode && !!instantFeedback}
                             >
-                                {currentQ.options && currentQ.options.map((option, idx) => (
-                                    <div
-                                        key={idx}
-                                        onClick={() => handleOptionSelect(idx.toString())}
-                                        className={`
+                                {currentQ.options && currentQ.options.map((option, idx) => {
+                                    const isSelected = answers[currentQ.id] === idx;
+
+                                    // Feedback Styles
+                                    let feedbackClass = "";
+                                    if (interactiveMode && isSelected && instantFeedback) {
+                                        if (instantFeedback.isCorrect) feedbackClass = "border-green-500 bg-green-500/10";
+                                        else feedbackClass = "border-red-500 bg-red-500/10";
+                                    }
+                                    // Highlight correct answer if wrong
+                                    if (interactiveMode && instantFeedback && !instantFeedback.isCorrect && option === instantFeedback.correctAnswer) {
+                                        feedbackClass = "border-green-500 bg-green-500/10 ring-2 ring-green-500/30";
+                                    }
+
+                                    return (
+                                        <div
+                                            key={idx}
+                                            onClick={() => !((interactiveMode && !!instantFeedback)) && handleOptionSelect(idx.toString())}
+                                            className={`
                                             flex items-center space-x-3 rounded-xl border-2 p-4 transition-all cursor-pointer group
-                                            ${answers[currentQ.id] === idx
-                                                ? "border-primary bg-primary/5 shadow-sm"
-                                                : "border-transparent bg-muted/50 hover:bg-muted hover:border-muted-foreground/20"}
+                                            ${isSelected && !feedbackClass
+                                                    ? "border-primary bg-primary/5 shadow-sm"
+                                                    : feedbackClass || "border-transparent bg-muted/50 hover:bg-muted hover:border-muted-foreground/20"}
                                         `}
-                                    >
-                                        <RadioGroupItem value={idx.toString()} id={`option-${idx}`} />
-                                        <Label htmlFor={`option-${idx}`} className="flex-1 cursor-pointer font-medium text-base leading-snug group-hover:text-foreground/80">
-                                            {option}
-                                        </Label>
-                                    </div>
-                                ))}
+                                        >
+                                            <RadioGroupItem value={idx.toString()} id={`option-${idx}`} />
+                                            <Label htmlFor={`option-${idx}`} className="flex-1 cursor-pointer font-medium text-base leading-snug group-hover:text-foreground/80">
+                                                {option}
+                                            </Label>
+
+                                            {/* Status Icons */}
+                                            {interactiveMode && isSelected && instantFeedback && instantFeedback.isCorrect && (
+                                                <CheckCircle className="h-5 w-5 text-green-500" />
+                                            )}
+                                            {interactiveMode && isSelected && instantFeedback && !instantFeedback.isCorrect && (
+                                                <AlertCircle className="h-5 w-5 text-red-500" />
+                                            )}
+                                        </div>
+                                    )
+                                })}
                             </RadioGroup>
+
+                            {/* Explanation if Wrong in Interactive Mode */}
+                            {interactiveMode && instantFeedback && !instantFeedback.isCorrect && (
+                                <div className="space-y-4">
+                                    <div className="p-4 bg-muted/50 rounded-lg border text-sm text-muted-foreground animate-in fade-in slide-in-from-top-2">
+                                        <p className="font-semibold text-foreground mb-1">Incorrect</p>
+                                        <p className="mb-2">This question has been automatically added to your flashcards.</p>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Ghost Box Animation for Flashcard Creation */}
+                            <AnimatePresence>
+                                {showGhost && (
+                                    <motion.div
+                                        initial={{ opacity: 0, scale: 0.8, y: 10 }}
+                                        animate={{ opacity: 1, scale: 1, y: 0 }}
+                                        exit={{ opacity: 0, scale: 0.8, y: -10 }}
+                                        className="fixed bottom-8 right-8 z-50 bg-background border border-border shadow-2xl p-4 rounded-xl flex items-center gap-4 w-80 pointer-events-none"
+                                    >
+                                        <div className="h-10 w-10 bg-primary/20 rounded-lg flex items-center justify-center">
+                                            <Zap className="h-6 w-6 text-primary animate-pulse" />
+                                        </div>
+                                        <div>
+                                            <p className="text-sm font-semibold">Creating Flashcard...</p>
+                                            <p className="text-xs text-muted-foreground">Adding specific mistake to deck</p>
+                                        </div>
+                                        <div className="h-2 w-2 bg-green-500 rounded-full animate-ping ml-auto" />
+                                    </motion.div>
+                                )}
+                            </AnimatePresence>
+
                         </CardContent>
                         <CardFooter className="flex justify-between border-t mt-4 bg-muted/5 py-4">
                             <Button variant="ghost" onClick={handlePrev} disabled={currentQIndex === 0} className="hover:bg-muted/80">

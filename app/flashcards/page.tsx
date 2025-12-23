@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, Suspense } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
@@ -12,7 +12,7 @@ import { useSearchParams } from "next/navigation"
 
 import ReactMarkdown from "react-markdown"
 
-export default function FlashcardsPage() {
+function FlashcardsContent() {
     const searchParams = useSearchParams()
     const topicParam = searchParams.get("topic")
 
@@ -153,7 +153,9 @@ export default function FlashcardsPage() {
                     <Card className="absolute w-full h-full backface-hidden rotate-y-180 bg-muted/30 flex flex-col items-center justify-center p-8 text-center border-dashed border-2 shadow-inner">
                         <CardContent className="space-y-4">
                             <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wider">Answer</h3>
-                            <p className="text-xl leading-relaxed">{currentCard.back}</p>
+                            <div className="prose dark:prose-invert prose-lg max-w-none">
+                                <ReactMarkdown>{currentCard.back}</ReactMarkdown>
+                            </div>
                         </CardContent>
                     </Card>
                 </div>
@@ -172,5 +174,13 @@ export default function FlashcardsPage() {
                 </Button>
             </div>
         </div>
+    )
+}
+
+export default function FlashcardsPage() {
+    return (
+        <Suspense fallback={<div className="p-8 text-center text-muted-foreground">Loading flashcards...</div>}>
+            <FlashcardsContent />
+        </Suspense>
     )
 }

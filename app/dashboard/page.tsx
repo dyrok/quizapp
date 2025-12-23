@@ -12,19 +12,7 @@ import { getQuizzesFromDB, deleteQuizFromDB } from "@/lib/actions"
 
 // ... inside component ...
 
-const deleteQuiz = async (id: string, e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
 
-    try {
-        await deleteQuizFromDB(id);
-        const updated = savedQuizzes.filter(q => q.id !== id);
-        setSavedQuizzes(updated);
-        toast.success("Quiz removed from database");
-    } catch (error) {
-        toast.error("Failed to delete quiz");
-    }
-}
 
 const stats = [
     {

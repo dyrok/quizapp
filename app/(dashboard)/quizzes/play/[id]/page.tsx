@@ -23,6 +23,7 @@ export default function QuizPlayPage({ params }: { params: Promise<{ id: string 
 
     // State
     const [quizQuestions, setQuizQuestions] = useState<Question[] | null>(null)
+    const [quizTopic, setQuizTopic] = useState<string | null>(null)
     const [loading, setLoading] = useState(true)
 
     const [currentQIndex, setCurrentQIndex] = useState(0)
@@ -55,6 +56,7 @@ export default function QuizPlayPage({ params }: { params: Promise<{ id: string 
 
                 if (quiz) {
                     setQuizQuestions(quiz.questions);
+                    setQuizTopic(quiz.topic || null);
                     setLoading(false);
                     return;
                 }
@@ -205,7 +207,7 @@ export default function QuizPlayPage({ params }: { params: Promise<{ id: string 
                 if (quizId !== 'custom') {
                     await saveQuizResultToDB({
                         quizId: quizId,
-                        topic: "General", // Placeholder
+                        topic: quizTopic || "General",
                         score: score,
                         totalQuestions: quizQuestions.length,
                         wrongAnswers: wrongAnswers
@@ -225,9 +227,10 @@ export default function QuizPlayPage({ params }: { params: Promise<{ id: string 
             localStorage.setItem("flashcard_queue", JSON.stringify(flashcardQueue));
         }
 
-        // Save answers to local storage (legacy path for results page)
+        // Save answers to local storage for results page
         localStorage.setItem("quizResults_answers", JSON.stringify(answers));
         localStorage.setItem("quizResults_questions", JSON.stringify(quizQuestions));
+        localStorage.setItem("quizResults_topic", quizTopic || "Quiz Review");
         router.push(`/quizzes/results/${unwrappedParams.id}`)
     }
 

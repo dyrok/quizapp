@@ -13,6 +13,7 @@ function sanitize(doc: any) {
 export async function saveQuizToDB(quizData: {
     title: string;
     topic: string;
+    emoji: string;
     difficulty: string;
     questions: Question[];
 }) {
@@ -21,6 +22,7 @@ export async function saveQuizToDB(quizData: {
     const newQuiz = new Quiz({
         title: quizData.title,
         topic: quizData.topic,
+        emoji: quizData.emoji,
         difficulty: quizData.difficulty,
         questions: quizData.questions,
         createdAt: new Date(),
@@ -33,6 +35,7 @@ export async function saveQuizToDB(quizData: {
         id: saved._id.toString(),
         title: saved.title,
         topic: saved.topic,
+        emoji: saved.emoji,
         difficulty: saved.difficulty,
         questions: saved.questions.map((q: any) => ({
             id: q._id ? q._id.toString() : (q.id || Math.random().toString()),
@@ -46,18 +49,24 @@ export async function saveQuizToDB(quizData: {
 
 export async function updateQuizInDB(quizId: string, data: {
     title: string;
+    emoji?: string;
     questions: Question[];
 }) {
     await connectToDatabase();
+
+    console.log("updateQuizInDB called for:", quizId);
+    console.log("Data received:", data);
 
     const updatedQuiz = await Quiz.findByIdAndUpdate(
         quizId,
         {
             title: data.title,
+            emoji: data.emoji,
             questions: data.questions,
         },
         { new: true }
     );
+    console.log("Updated Quiz result:", updatedQuiz);
 
     if (!updatedQuiz) {
         throw new Error("Quiz not found");
@@ -67,6 +76,7 @@ export async function updateQuizInDB(quizId: string, data: {
         id: updatedQuiz._id.toString(),
         title: updatedQuiz.title,
         topic: updatedQuiz.topic,
+        emoji: updatedQuiz.emoji,
         difficulty: updatedQuiz.difficulty,
         questions: updatedQuiz.questions.map((q: any) => ({
             id: q._id ? q._id.toString() : (q.id || Math.random().toString()),
@@ -89,6 +99,7 @@ export async function getQuizzesFromDB() {
         id: q._id.toString(), // Map _id to id for frontend compatibility
         title: q.title,
         topic: q.topic,
+        emoji: q.emoji,
         date: q.createdAt.toISOString(),
         questions: q.questions ? q.questions.map((qn: any) => ({
             id: qn.id || qn._id?.toString(),
@@ -110,6 +121,7 @@ export async function getQuizFromDB(id: string) {
             id: quiz._id.toString(),
             title: quiz.title,
             topic: quiz.topic,
+            emoji: quiz.emoji,
             date: quiz.createdAt.toISOString(),
             questions: quiz.questions.map((q: any) => ({
                 id: q.id || q._id?.toString() || Math.random().toString(), // Ensure ID is string
@@ -130,6 +142,34 @@ export async function deleteQuizFromDB(id: string) {
     return { success: true };
 }
 
+export async function generateQuizFromPDF(formData: FormData) {
+    const file = formData.get("pdf") as File;
+    if (!file) {
+        throw new Error("No file provided");
+    }
+
+    try {
+        const arrayBuffer = await file.arrayBuffer();
+        const buffer = Buffer.from(arrayBuffer);
+
+        // Dynamic import to avoid build issues if pdf-parse is strictly server-side
+        const pdfParse = (await import("pdf-parse")).default;
+        const data = await pdfParse(buffer);
+        const text = data.text;
+
+        // Truncate to avoid token limits (approx 15k chars is safe for flash-lite, maybe more but safe side)
+        const truncatedText = text.substring(0, 20000);
+
+        // Use existing generation action
+        const { generateQuizAction } = await import("./gemini");
+        return await generateQuizAction(truncatedText);
+
+    } catch (error) {
+        console.error("PDF Parse Error:", error);
+        throw new Error("Failed to parse PDF");
+    }
+}
+
 // --- Flashcards ---
 import FlashcardSet from "@/models/FlashcardSet";
 
@@ -141,16 +181,31 @@ export async function saveFlashcardsToDB(data: { topic: string, cards: { front: 
         createdAt: new Date(),
     });
     const saved = await newSet.save();
-    return sanitize(saved);
+
+    // Manually serialize to ensure no nested ObjectsIds remain
+    return {
+        id: saved._id.toString(),
+        topic: saved.topic,
+        cards: saved.cards.map((c: any) => ({
+            front: c.front,
+            back: c.back,
+            _id: c._id ? c._id.toString() : undefined
+        })),
+        createdAt: saved.createdAt.toISOString()
+    };
 }
 
 export async function getFlashcardSetsFromDB() {
     await connectToDatabase();
-    const sets = await FlashcardSet.find({}).sort({ createdAt: -1 });
-    return sets.map(s => ({
+    const sets = await FlashcardSet.find({}).sort({ createdAt: -1 }).lean();
+    return sets.map((s: any) => ({
         id: s._id.toString(),
         topic: s.topic,
-        cards: s.cards,
+        cards: s.cards ? s.cards.map((c: any) => ({
+            front: c.front,
+            back: c.back,
+            _id: c._id ? c._id.toString() : undefined
+        })) : [],
         date: s.createdAt.toISOString()
     }));
 }

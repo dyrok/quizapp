@@ -27,6 +27,7 @@ import {
     SidebarSeparator,
 } from "@/components/ui/sidebar"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { HoverBorderGradient } from "@/components/ui/hover-border-gradient"
 
 // Menu items.
 const items = [
@@ -91,11 +92,17 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                         <SidebarMenuButton
                             asChild
                             size="lg"
-                            className="bg-primary text-primary-foreground hover:bg-primary/90 mt-4 shadow-md border border-primary/20 transition-all hover:scale-[1.02] active:scale-[0.98]"
+                            className="bg-transparent hover:bg-transparent data-[active=true]:bg-transparent data-[state=open]:bg-transparent p-0 mt-4 h-auto hover:scale-[1.02] active:scale-[0.98] transition-all group ring-0 focus:ring-0 outline-none focus:outline-none hover:ring-0"
                         >
-                            <Link href="/create">
-                                <PlusCircle className="mr-2 h-5 w-5" />
-                                <span className="font-bold text-base">Create New Quiz</span>
+                            <Link href="/create" className="w-full flex justify-center">
+                                <HoverBorderGradient
+                                    containerClassName="rounded-xl w-full"
+                                    as="div"
+                                    className="bg-primary text-primary-foreground dark:bg-primary dark:text-primary-foreground flex items-center justify-center space-x-2 w-full py-3"
+                                >
+                                    <PlusCircle className="mr-2 h-5 w-5" />
+                                    <span className="font-bold text-base">Create Quiz</span>
+                                </HoverBorderGradient>
                             </Link>
                         </SidebarMenuButton>
                     </SidebarMenuItem>

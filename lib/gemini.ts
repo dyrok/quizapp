@@ -1,9 +1,9 @@
 "use server"
 
-import { GoogleGenerativeAI } from "@google/generative-ai"
+import Groq from "groq-sdk"
 
-const genAI = new GoogleGenerativeAI(process.env.NEXT_PUBLIC_GEMINI_API_KEY || "");
-const modelName = "gemini-2.5-flash-lite"; // User specified model
+const groq = new Groq({ apiKey: process.env.GROQ_API_KEY || "" });
+const modelName = "llama-3.3-70b-versatile";
 
 export interface Question {
     id: number;
@@ -27,7 +27,7 @@ async function runWithRetry<T>(fn: () => Promise<T>, retries = 3, delay = 1000):
     } catch (error: any) {
         if (retries <= 0) throw error;
 
-        console.warn(`Gemini API Error, retrying... (${retries} attempts left). Error: ${error.message}`);
+        console.warn(`Groq API Error, retrying... (${retries} attempts left). Error: ${error.message}`);
         await new Promise(res => setTimeout(res, delay));
         return runWithRetry(fn, retries - 1, delay * 2);
     }
@@ -44,57 +44,70 @@ function cleanJsonString(input: string): string {
     return clean.trim();
 }
 
-export async function generateQuizAction(text: string): Promise<Question[]> {
-    if (!text) return [];
+export async function generateQuizAction(text: string): Promise<{ emoji: string, questions: Question[] }> {
+    if (!text) return { emoji: "📝", questions: [] };
 
     const callAi = async () => {
-        const model = genAI.getGenerativeModel({
+        const chatCompletion = await groq.chat.completions.create({
             model: modelName,
-            generationConfig: { responseMimeType: "application/json" }
+            messages: [
+                {
+                    role: "system",
+                    content: "You are an expert teacher that generates quizzes. You MUST respond with valid JSON only, no extra text."
+                },
+                {
+                    role: "user",
+                    content: `Analyze the following text and generate a multiple-choice quiz with 5-10 questions.
+The questions should test understanding of key concepts.
+
+IMPORTANT: If a question involves code, YOU MUST USE MARKDOWN CODE BLOCKS for the code itself.
+For example:
+"What is the output of this Python code?
+\`\`\`python
+print('Hello')
+\`\`\`"
+
+Do NOT use inline code (single backticks) for multi-line code snippets.
+
+Also, generate a single emoji that best represents the topic of this quiz (e.g., "🧬" for Biology, "⚛️" for Physics, "📜" for History).
+
+Return ONLY a JSON object with this exact structure:
+{
+    "emoji": "🧬",
+    "questions": [
+        {
+            "id": 1,
+            "question": "Question text here (with markdown code blocks if needed)",
+            "options": ["Option A", "Option B", "Option C", "Option D"],
+            "answer": "Option A",
+            "explanation": "Brief explanation of why this is the correct answer."
+        }
+    ]
+}
+
+Text to analyze:
+${text.substring(0, 15000)}`
+                }
+            ],
+            temperature: 0.7,
+            max_tokens: 4096,
+            response_format: { type: "json_object" }
         });
 
-        const prompt = `
-            You are an expert teacher. 
-            Analyze the following text and generate a multiple-choice quiz with 5-10 questions.
-            The questions should test understanding of key concepts.
-            
-            IMPORTANT: If a question involves code, YOU MUST USE MARKDOWN CODE BLOCKS for the code itself.
-            For example:
-            "What is the output of this Python code?
-            \`\`\`python
-            print('Hello')
-            \`\`\`"
-
-            Do NOT use inline code (single backticks) for multi-line code snippets.
-            
-            Return ONLY a JSON array of objects with this exact structure:
-            [
-                {
-                    "id": 1, 
-                    "question": "Question text here (with markdown code blocks if needed)",
-                    "options": ["Option A", "Option B", "Option C", "Option D"],
-                    "answer": "Option A", 
-                    "explanation": "Brief explanation of why this is the correct answer."
-                }
-            ]
-
-            Text to analyze:
-            ${text.substring(0, 15000)}
-        `;
-
-        const result = await model.generateContent(prompt);
-        const response = await result.response;
-        return response.text();
+        return chatCompletion.choices[0]?.message?.content || "{}";
     };
 
     try {
         const jsonString = await runWithRetry(callAi);
-        const questions = JSON.parse(cleanJsonString(jsonString));
+        const data = JSON.parse(cleanJsonString(jsonString));
 
         // Validation check
-        if (!Array.isArray(questions)) throw new Error("AI returned invalid structure (not array)");
+        if (!data.questions || !Array.isArray(data.questions)) throw new Error("AI returned invalid structure (questions missing or not array)");
 
-        return questions.map((q: any, i: number) => ({ ...q, id: i + 1 }));
+        return {
+            emoji: data.emoji || "📝",
+            questions: data.questions.map((q: any, i: number) => ({ ...q, id: i + 1 }))
+        };
 
     } catch (error: any) {
         console.error("Quiz Generation Final Error:", error);
@@ -134,35 +147,42 @@ export async function analyzeQuizResultAction(
     }
 
     const callAi = async () => {
-        const model = genAI.getGenerativeModel({
-            model: "gemini-2.5-flash", // Upgrade to flash
-            generationConfig: { responseMimeType: "application/json" }
+        const chatCompletion = await groq.chat.completions.create({
+            model: modelName,
+            messages: [
+                {
+                    role: "system",
+                    content: "You are an expert tutor. Analyze quiz results and generate feedback and flashcards. Respond with valid JSON only."
+                },
+                {
+                    role: "user",
+                    content: `A student took a quiz and achieved a score of ${score}/${questions.length}.
+
+Mistakes made:
+${JSON.stringify(mistakes)}
+
+Analyze their performance (considering both their score and specific mistakes) and generate:
+1. A 2-sentence encouraging feedback summary acknowledging what they did right vs wrong.
+2. A list of flashcards (Front/Back) to help them learn the specific concepts they missed.
+
+CRITICAL FOR FLASHCARDS:
+- The 'Back' (Answer) MUST be VERY CONCISE (1-5 words or a short phrase).
+- The 'Front' (Question) should be specific enough to lead to that short answer.
+- Use MARKDOWN syntax for code blocks if needed.
+
+Return ONLY JSON:
+{
+    "feedback": "...",
+    "flashcards": [ {"front": "...", "back": "..."} ]
+}`
+                }
+            ],
+            temperature: 0.7,
+            max_tokens: 2048,
+            response_format: { type: "json_object" }
         });
 
-        const prompt = `
-            A student took a quiz and achieved a score of ${score}/${questions.length}.
-            
-            Mistakes made:
-            ${JSON.stringify(mistakes)}
-            
-            Analyze their performance (considering both their score and specific mistakes) and generate:
-            1. A 2-sentence encouraging feedback summary acknowledging what they did right vs wrong.
-            2. A list of flashcards (Front/Back) to help them learn the specific concepts they missed.
-            
-            CRITICAL FOR FLASHCARDS:
-            - The 'Back' (Answer) MUST be VERY CONCISE (1-5 words or a short phrase).
-            - The 'Front' (Question) should be specific enough to lead to that short answer.
-            - Use MARKDOWN syntax for code blocks if needed.
-
-            Return ONLY JSON:
-            {
-                "feedback": "...",
-                "flashcards": [ {"front": "...", "back": "..."} ]
-            }
-        `;
-
-        const result = await model.generateContent(prompt);
-        return result.response.text();
+        return chatCompletion.choices[0]?.message?.content || "{}";
     };
 
     try {
@@ -185,5 +205,41 @@ export async function analyzeQuizResultAction(
             feedback: "Good effort! Review the questions above to improve.",
             flashcards: []
         };
+    }
+}
+
+// Chat completion for Ted chatbot - callable from client components as a server action
+export async function chatWithTed(
+    history: { role: "user" | "assistant", content: string }[],
+    userMessage: string
+): Promise<string> {
+    const systemPrompt = `You are Ted, a friendly and knowledgeable AI study assistant. You help students understand their quiz mistakes, clarify complex topics, and provide clear explanations.
+
+Rules:
+- Be concise but thorough in your explanations.
+- Use markdown formatting for code blocks, lists, and emphasis.
+- If a student asks about a specific topic, provide examples and analogies.
+- Be encouraging and supportive.
+- If you don't know something, say so honestly.`;
+
+    try {
+        const chatCompletion = await groq.chat.completions.create({
+            model: modelName,
+            messages: [
+                { role: "system", content: systemPrompt },
+                ...history.map(m => ({ role: m.role as "user" | "assistant", content: m.content })),
+                { role: "user", content: userMessage }
+            ],
+            temperature: 0.7,
+            max_tokens: 1024,
+        });
+
+        return chatCompletion.choices[0]?.message?.content || "I'm sorry, I couldn't generate a response. Please try again.";
+    } catch (error: any) {
+        console.error("Chat Error:", error);
+        if (error.status === 429) {
+            return "I'm thinking a bit too hard right now (Rate Limit). Give me a moment and try again.";
+        }
+        return "I'm sorry, I encountered an error. Please try again.";
     }
 }

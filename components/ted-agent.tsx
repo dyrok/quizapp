@@ -8,17 +8,14 @@ import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Bot, X, Send, Sparkles, Loader2, Maximize2, Minimize2, TextCursor } from "lucide-react"
-import { GoogleGenerativeAI } from "@google/generative-ai"
+import { chatWithTed } from "@/lib/gemini"
 import { toast } from "sonner"
 import { motion, AnimatePresence } from "framer-motion"
 import ReactMarkdown from 'react-markdown'
 
-// Initialize Gemini
-const genAI = new GoogleGenerativeAI(process.env.NEXT_PUBLIC_GEMINI_API_KEY || "");
-
 type Message = {
     id: string
-    role: "user" | "model"
+    role: "user" | "assistant"
     content: string
 }
 
@@ -34,10 +31,9 @@ export function TedAgent() {
 
     // Auto-scroll to bottom
     useEffect(() => {
-        // Validation check to ensure we only scroll when content changes
         const timeout = setTimeout(() => {
             endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" })
-        }, 100) // Small delay to allow DOM render
+        }, 100)
         return () => clearTimeout(timeout)
     }, [messages, isOpen, loading])
 
@@ -47,14 +43,9 @@ export function TedAgent() {
             const selection = window.getSelection()?.toString().trim()
             if (selection && selection.length > 0) {
                 setSelectedContext(selection)
-            } else {
-                // Determine if we should clear it? 
-                // Let's keep it until manually cleared or used, to avoid flickering
             }
         }
 
-        // Listen for selection changes only when open? Or always?
-        // Let's listen on mouseup/keyup globally but only update if something is selected
         document.addEventListener('mouseup', handleSelection)
         document.addEventListener('keyup', handleSelection)
 
@@ -66,7 +57,7 @@ export function TedAgent() {
 
     const handleSend = async () => {
         const currentInput = input.trim();
-        const currentSelectedContext = selectedContext; // Capture current value
+        const currentSelectedContext = selectedContext;
         if (!currentInput && !currentSelectedContext) return;
 
         let fullPrompt = currentInput;
@@ -75,7 +66,7 @@ export function TedAgent() {
         if (currentSelectedContext) {
             fullPrompt = `Context: "${currentSelectedContext}"\n\nUser Question: ${currentInput}`;
             visibleContent = `Ref: "${currentSelectedContext.substring(0, 50)}..."\n\n${currentInput}`;
-            setSelectedContext(null); // Clear context after sending
+            setSelectedContext(null);
         }
 
         const storedMsg: Message = { id: Date.now().toString(), role: "user", content: visibleContent }
@@ -85,49 +76,19 @@ export function TedAgent() {
         setLoading(true)
 
         try {
-            const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash-lite" });
-
-            // Construct history correctly
+            // Build history for the server action
             const history = messages.map(m => ({
                 role: m.role,
-                parts: [{ text: m.content }]
+                content: m.content
             }));
 
-            const chat = model.startChat({
-                history: history,
-                generationConfig: {
-                    maxOutputTokens: 1000, // Increased for better explanations
-                },
-            });
+            const text = await chatWithTed(history, fullPrompt);
 
-            const sendWithRetry = async (retries = 1): Promise<string> => {
-                try {
-                    const result = await chat.sendMessage(fullPrompt); // Send the full context prompt
-                    const response = result.response;
-                    return response.text();
-                } catch (err: any) {
-                    if (retries > 0 && (err.message?.includes("429") || err.status === 429)) {
-                        console.log("Rate limited (429). Retrying in 5s...");
-                        await new Promise(resolve => setTimeout(resolve, 5000));
-                        return sendWithRetry(retries - 1);
-                    }
-                    throw err;
-                }
-            };
-
-            const text = await sendWithRetry();
-
-            setMessages(prev => [...prev, { id: (Date.now() + 1).toString(), role: "model", content: text }])
+            setMessages(prev => [...prev, { id: (Date.now() + 1).toString(), role: "assistant", content: text }])
         } catch (error: any) {
-            console.error("Gemini Error:", error)
-            let errorMessage = "I'm sorry, I encountered an error. Please try again.";
-
-            if (error.message?.includes("429") || error.status === 429) {
-                errorMessage = "I'm thinking a bit too hard right now (Rate Limit). Give me a moment.";
-            }
-
+            console.error("Chat Error:", error)
             toast.error("AI Error")
-            setMessages(prev => [...prev, { id: (Date.now() + 1).toString(), role: "model", content: errorMessage }])
+            setMessages(prev => [...prev, { id: (Date.now() + 1).toString(), role: "assistant", content: "I'm sorry, I encountered an error. Please try again." }])
         } finally {
             setLoading(false)
         }
@@ -142,7 +103,6 @@ export function TedAgent() {
                         initial={{ opacity: 0, scale: 0.9, y: 20 }}
                         animate={{ opacity: 1, scale: 1, y: 0 }}
                         exit={{ opacity: 0, scale: 0.9, y: 20 }}
-                        // Added max-h-[85vh] to ensure it fits in viewport, and flex column layout
                         className={`mb-4 w-[350px] ${isExpanded ? "w-[600px] h-[700px] max-h-[85vh]" : "h-[500px] max-h-[80vh]"} shadow-2xl pointer-events-auto flex flex-col`}
                     >
                         <Card className="flex flex-col h-full border border-border bg-card shadow-xl overflow-hidden">
@@ -154,7 +114,7 @@ export function TedAgent() {
                                     </Avatar>
                                     <div>
                                         <CardTitle className="text-sm font-medium">Ted AI</CardTitle>
-                                        <p className="text-[10px] text-muted-foreground">Study Assistant (Gemini 2.5)</p>
+                                        <p className="text-[10px] text-muted-foreground">Study Assistant (Groq)</p>
                                     </div>
                                 </div>
                                 <div className="flex gap-1">
@@ -167,7 +127,7 @@ export function TedAgent() {
                                 </div>
                             </CardHeader>
 
-                            {/* Scrollable Messages Area - Added min-h-0 for flex shrinking */}
+                            {/* Scrollable Messages Area */}
                             <div className="flex-1 min-h-0 bg-background/50 relative">
                                 <ScrollArea className="h-full p-4">
                                     <div className="flex flex-col gap-4 pb-4">
@@ -190,7 +150,6 @@ export function TedAgent() {
                                                         <ReactMarkdown
                                                             components={{
                                                                 code({ node, className, children, ...props }) {
-                                                                    const match = /language-(\w+)/.exec(className || '')
                                                                     return !className?.includes('language') ? (
                                                                         <code className="bg-black/20 dark:bg-white/10 px-1 py-0.5 rounded font-mono text-xs" {...props}>
                                                                             {children}

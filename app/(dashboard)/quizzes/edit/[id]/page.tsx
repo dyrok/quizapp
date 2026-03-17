@@ -22,6 +22,7 @@ export default function EditQuizPage({ params }: { params: Promise<{ id: string 
 
     // Form State
     const [title, setTitle] = useState("")
+    const [emoji, setEmoji] = useState("")
     const [questions, setQuestions] = useState<any[]>([])
 
     useEffect(() => {
@@ -35,6 +36,7 @@ export default function EditQuizPage({ params }: { params: Promise<{ id: string 
                 }
                 setQuiz(data)
                 setTitle(data.title || data.topic)
+                setEmoji(data.emoji || "")
                 setQuestions(data.questions.map((q: any) => ({
                     ...q,
                     options: [...q.options] // Clone options array
@@ -54,6 +56,7 @@ export default function EditQuizPage({ params }: { params: Promise<{ id: string 
         try {
             await updateQuizInDB(quizId, {
                 title,
+                emoji,
                 questions
             })
             toast.success("Quiz updated successfully")
@@ -126,6 +129,18 @@ export default function EditQuizPage({ params }: { params: Promise<{ id: string 
                             placeholder="Enter quiz title..."
                             className="bg-background text-lg"
                         />
+                    </div>
+                    <div className="space-y-2 pt-4">
+                        <Label htmlFor="emoji">Emoji Icon</Label>
+                        <Input
+                            id="emoji"
+                            value={emoji}
+                            onChange={(e) => setEmoji(e.target.value)}
+                            placeholder="e.g. 🚀"
+                            className="bg-background text-2xl w-24 text-center"
+                            maxLength={2}
+                        />
+                        <p className="text-xs text-muted-foreground">Displayed on the quiz card.</p>
                     </div>
                 </CardContent>
             </Card>

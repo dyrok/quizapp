@@ -1,16 +1,18 @@
 import mongoose, { Schema, model, models } from 'mongoose';
 
 const QuestionSchema = new Schema({
-    id: { type: Number, required: true },
+    id: { type: String, required: true }, // Changed to String to support both numeric and ObjectId strings
     question: { type: String, required: true },
     options: [{ type: String, required: true }],
-    answer: { type: String, required: true }, // The string text of the correct answer
-    correctIndex: { type: Number } // Index of the correct answer (optional but helpful)
+    answer: { type: String, required: true },
+    explanation: { type: String }, // AI provides this, good to store
+    correctIndex: { type: Number }
 });
 
 const QuizSchema = new Schema({
     title: { type: String, required: true },
     topic: { type: String, required: true },
+    emoji: { type: String }, // User-defined emoji
     difficulty: { type: String },
     questions: [QuestionSchema],
     createdAt: { type: Date, default: Date.now },

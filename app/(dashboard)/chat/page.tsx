@@ -8,6 +8,8 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Bot, User, Send, Sparkles, Copy, ThumbsUp, ThumbsDown, Loader2 } from "lucide-react"
 import { toast } from "sonner"
+import { chatWithTed } from "@/lib/gemini"
+import ReactMarkdown from "react-markdown"
 
 type Message = {
     id: string
@@ -46,20 +48,42 @@ export default function ChatPage() {
         }
 
         setMessages(prev => [...prev, newMsg])
+        const userInput = input
         setInput("")
         setLoading(true)
 
-        // Simulate AI response
-        setTimeout(() => {
+        try {
+            // Build history (exclude the initial greeting for cleaner context)
+            const history = messages
+                .filter(m => m.id !== "1") // skip initial greeting
+                .map(m => ({ role: m.role, content: m.content }));
+
+            const responseText = await chatWithTed(history, userInput);
+
             const response: Message = {
                 id: (Date.now() + 1).toString(),
                 role: "assistant",
-                content: "That's a great question. Based on your recent quiz on Calculus, it seems you might be confused about the Chain Rule. \n\nHere's a simpler way to think about it: treat the inner function as a single variable first...",
+                content: responseText,
                 timestamp: new Date()
             }
             setMessages(prev => [...prev, response])
+        } catch (error: any) {
+            console.error("Chat error:", error)
+            toast.error("Failed to get response")
+            setMessages(prev => [...prev, {
+                id: (Date.now() + 1).toString(),
+                role: "assistant",
+                content: "I'm sorry, I encountered an error. Please try again.",
+                timestamp: new Date()
+            }])
+        } finally {
             setLoading(false)
-        }, 1500)
+        }
+    }
+
+    const handleCopy = (content: string) => {
+        navigator.clipboard.writeText(content)
+        toast.success("Copied to clipboard")
     }
 
     return (
@@ -72,7 +96,7 @@ export default function ChatPage() {
                         </div>
                         <div>
                             <h3 className="font-semibold">Ted</h3>
-                            <p className="text-xs text-muted-foreground">AI Tutor • Gemini 2.5 Flash</p>
+                            <p className="text-xs text-muted-foreground">AI Tutor (Groq)</p>
                         </div>
                     </div>
                     <Button variant="ghost" size="icon">
@@ -99,11 +123,31 @@ export default function ChatPage() {
                                 </Avatar>
                                 <div className={`flex flex-col gap-2 max-w-[80%]`}>
                                     <div className={`rounded-2xl p-4 text-sm ${msg.role === "user" ? "bg-primary text-primary-foreground" : "bg-muted"}`}>
-                                        {msg.content}
+                                        <div className="prose dark:prose-invert prose-sm max-w-none break-words">
+                                            <ReactMarkdown
+                                                components={{
+                                                    code({ node, className, children, ...props }) {
+                                                        return !className?.includes('language') ? (
+                                                            <code className="bg-black/20 dark:bg-white/10 px-1 py-0.5 rounded font-mono text-xs" {...props}>
+                                                                {children}
+                                                            </code>
+                                                        ) : (
+                                                            <pre className="mt-2 mb-2 p-2 bg-black/90 text-white rounded-md overflow-x-auto text-xs font-mono">
+                                                                <code className={className} {...props}>
+                                                                    {children}
+                                                                </code>
+                                                            </pre>
+                                                        )
+                                                    }
+                                                }}
+                                            >
+                                                {msg.content}
+                                            </ReactMarkdown>
+                                        </div>
                                     </div>
                                     {msg.role === "assistant" && (
                                         <div className="flex items-center gap-2 text-muted-foreground">
-                                            <Button variant="ghost" size="icon" className="h-6 w-6"><Copy className="h-3 w-3" /></Button>
+                                            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => handleCopy(msg.content)}><Copy className="h-3 w-3" /></Button>
                                             <Button variant="ghost" size="icon" className="h-6 w-6"><ThumbsUp className="h-3 w-3" /></Button>
                                             <Button variant="ghost" size="icon" className="h-6 w-6"><ThumbsDown className="h-3 w-3" /></Button>
                                         </div>

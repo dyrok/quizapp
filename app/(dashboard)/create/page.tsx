@@ -13,7 +13,7 @@ import { Sparkles, Loader2, FileText, Wand2 } from "lucide-react"
 import { toast } from "sonner"
 import { useRouter } from "next/navigation"
 import { generateQuizAction } from "@/lib/gemini"
-import { saveQuizToDB } from "@/lib/actions"
+import { saveQuizToDB, generateQuizFromPDF } from "@/lib/actions"
 
 export default function CreateQuizPage() {
     const router = useRouter()
@@ -22,6 +22,7 @@ export default function CreateQuizPage() {
 
     // Parse State
     const [parseText, setParseText] = useState("")
+    const [file, setFile] = useState<File | null>(null)
 
     // Generate State
     const [topic, setTopic] = useState("")
@@ -33,30 +34,51 @@ export default function CreateQuizPage() {
 
         let textToAnalyze = "";
         let quizTitle = "";
-
-        if (activeTab === 'parse') {
-            if (!parseText) {
-                toast.error("Please paste some text to analyze.");
-                setLoading(false);
-                return;
-            }
-            textToAnalyze = parseText;
-            quizTitle = "Notes Analysis"; // Default title for parsed text
-        } else {
-            if (!topic) {
-                toast.error("Please enter a topic.");
-                setLoading(false);
-                return;
-            }
-            // Synthesize a prompt 
-            textToAnalyze = `Generate a ${difficulty} difficulty quiz about ${topic} with ${count[0]} questions.`;
-            quizTitle = topic;
-        }
+        let generatedResult = null;
 
         try {
-            console.log("Generating quiz from:", textToAnalyze.substring(0, 50) + "...");
+            if (activeTab === 'upload') {
+                if (!file) {
+                    toast.error("Please select a PDF file.");
+                    setLoading(false);
+                    return;
+                }
 
-            const questions = await generateQuizAction(textToAnalyze);
+                const formData = new FormData();
+                formData.append("pdf", file);
+
+                // Static import used instead of dynamic
+                generatedResult = await generateQuizFromPDF(formData);
+
+                quizTitle = file.name.replace(".pdf", "");
+
+            } else if (activeTab === 'parse') {
+                if (!parseText) {
+                    toast.error("Please paste some text to analyze.");
+                    setLoading(false);
+                    return;
+                }
+                textToAnalyze = parseText;
+                quizTitle = "Notes Analysis"; // Default title for parsed text
+            } else {
+                if (!topic) {
+                    toast.error("Please enter a topic.");
+                    setLoading(false);
+                    return;
+                }
+                // Synthesize a prompt 
+                textToAnalyze = `Generate a ${difficulty} difficulty quiz about ${topic} with ${count[0]} questions.`;
+                quizTitle = topic;
+            }
+
+            console.log("Generating quiz...");
+
+            // If not PDF (already generated), use standard generation
+            if (!generatedResult) {
+                generatedResult = await generateQuizAction(textToAnalyze);
+            }
+
+            const { emoji, questions } = generatedResult;
 
             if (!questions || questions.length === 0) {
                 throw new Error("No questions generated.");
@@ -66,6 +88,7 @@ export default function CreateQuizPage() {
             const savedQuiz = await saveQuizToDB({
                 title: quizTitle,
                 topic: activeTab === 'generate' ? topic : 'Imported Content',
+                emoji: emoji,
                 difficulty: difficulty,
                 questions: questions,
             });
@@ -92,21 +115,49 @@ export default function CreateQuizPage() {
                         Create New Quiz
                     </CardTitle>
                     <CardDescription>
-                        Use AI to master any subject. Parse notes or generate from scratch.
+                        Use AI to master any subject. Parse notes, upload PDFs, or generate from scratch.
                     </CardDescription>
                 </CardHeader>
                 <CardContent>
-                    <Tabs defaultValue="parse" value={activeTab} onValueChange={setActiveTab} className="w-full">
-                        <TabsList className="grid w-full grid-cols-2 mb-6 h-12">
+                    <Tabs defaultValue="upload" value={activeTab} onValueChange={setActiveTab} className="w-full">
+                        <TabsList className="grid w-full grid-cols-3 mb-6 h-12">
+                            <TabsTrigger value="upload" className="text-base">
+                                <FileText className="mr-2 h-4 w-4" />
+                                Upload PDF
+                            </TabsTrigger>
                             <TabsTrigger value="parse" className="text-base">
                                 <FileText className="mr-2 h-4 w-4" />
-                                Paste & Analyzel
+                                Paste Text
                             </TabsTrigger>
                             <TabsTrigger value="generate" className="text-base">
                                 <Wand2 className="mr-2 h-4 w-4" />
                                 AI Generate
                             </TabsTrigger>
                         </TabsList>
+
+                        <TabsContent value="upload" className="space-y-4">
+                            <div className="border-2 border-dashed border-muted-foreground/25 rounded-xl p-10 flex flex-col items-center justify-center text-center hover:bg-muted/50 transition-colors bg-muted/20">
+                                <div className="h-16 w-16 bg-primary/10 rounded-full flex items-center justify-center mb-4">
+                                    <FileText className="h-8 w-8 text-primary" />
+                                </div>
+                                <h3 className="text-lg font-semibold mb-2">Upload Study Material</h3>
+                                <p className="text-sm text-muted-foreground max-w-xs mb-6">
+                                    Drag and drop a PDF here, or click to select. We'll extract questions automatically.
+                                </p>
+                                <Input
+                                    type="file"
+                                    accept=".pdf"
+                                    className="max-w-xs cursor-pointer file:cursor-pointer file:text-primary file:font-semibold file:bg-primary/10 file:border-0 file:rounded-md file:mr-4 file:px-4 file:py-2 hover:file:bg-primary/20 transition-all"
+                                    onChange={(e) => setFile(e.target.files?.[0] || null)}
+                                />
+                                {file && (
+                                    <div className="mt-4 flex items-center gap-2 text-sm font-medium text-green-600 bg-green-500/10 px-3 py-1 rounded-full">
+                                        <Sparkles className="h-3 w-3" />
+                                        {file.name} ready!
+                                    </div>
+                                )}
+                            </div>
+                        </TabsContent>
 
                         <TabsContent value="parse" className="space-y-4">
                             <div className="space-y-2">
@@ -179,11 +230,11 @@ export default function CreateQuizPage() {
                         {loading ? (
                             <>
                                 <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                                {activeTab === 'parse' ? 'Analyzing Content...' : 'Generating Quiz...'}
+                                {activeTab === 'generate' ? 'Generating Quiz...' : 'Analyzing Document...'}
                             </>
                         ) : (
                             <>
-                                {activeTab === 'parse' ? 'Generate Quiz from Text' : 'Generate Quiz'}
+                                {activeTab === 'upload' ? 'Generate from PDF' : activeTab === 'parse' ? 'Generate Quiz from Text' : 'Generate Quiz'}
                             </>
                         )}
                     </Button>

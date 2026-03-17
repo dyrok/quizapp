@@ -84,14 +84,23 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
             console.error(error);
             toast.error("AI Analysis failed.");
             // Fallback: show interactive cards if AI fails
-            if (interactiveCards.length > 0) {
-                setAnalysis({
-                    score: 0, // Should be calculated locally if AI fails, but for now 0
-                    total: qs.length,
-                    feedback: "AI Analysis unavailable. Review your interactive flashcards below.",
-                    flashcards: interactiveCards
-                } as any)
-            }
+            // Calculate score locally as fallback
+            let localScore = 0;
+            qs.forEach(q => {
+                if (as[q.id] !== undefined && q.options[as[q.id]] === q.answer) {
+                    localScore++;
+                }
+            });
+
+            setAnalysis({
+                score: localScore,
+                total: qs.length,
+                feedback: interactiveCards.length > 0
+                    ? "AI Analysis unavailable. Review your interactive flashcards below."
+                    : "AI Analysis unavailable. Review the questions above to improve.",
+                flashcards: interactiveCards
+            });
+
         } finally {
             setAnalysisLoading(false);
         }
@@ -110,10 +119,9 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
 
         const toastId = toast.loading("Saving flashcards...");
         try {
-            // Import save function dynamically or strictly
             const { saveFlashcardsToDB } = await import("@/lib/actions");
             await saveFlashcardsToDB({
-                topic: (analysis.flashcards[0] as any)?.topic || "Quiz Review", // Use topic from first card or default
+                topic: localStorage.getItem("quizResults_topic") || "Quiz Review",
                 cards: analysis.flashcards
             });
             toast.success("Flashcards saved deck!", { id: toastId });

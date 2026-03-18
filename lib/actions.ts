@@ -152,21 +152,25 @@ export async function generateQuizFromPDF(formData: FormData) {
         const arrayBuffer = await file.arrayBuffer();
         const buffer = Buffer.from(arrayBuffer);
 
-        // Dynamic import to avoid build issues if pdf-parse is strictly server-side
-        const pdfParse = (await import("pdf-parse")).default;
-        const data = await pdfParse(buffer);
-        const text = data.text;
+        // pdf-parse v2 uses PDFParse class, but types still reflect v1's default export
+        const pdfParseModule = await import("pdf-parse") as any;
+        const PDFParse = pdfParseModule.PDFParse;
+        const parser = new PDFParse({ data: buffer });
+        const result = await parser.getText();
+        const text = result.text;
 
-        // Truncate to avoid token limits (approx 15k chars is safe for flash-lite, maybe more but safe side)
+        if (!text || text.trim().length === 0) {
+            throw new Error("No text could be extracted from this PDF.");
+        }
+
         const truncatedText = text.substring(0, 20000);
 
-        // Use existing generation action
         const { generateQuizAction } = await import("./gemini");
         return await generateQuizAction(truncatedText);
 
-    } catch (error) {
+    } catch (error: any) {
         console.error("PDF Parse Error:", error);
-        throw new Error("Failed to parse PDF");
+        throw new Error(error.message || "Failed to parse PDF");
     }
 }
 

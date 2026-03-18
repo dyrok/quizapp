@@ -90,20 +90,39 @@ function FlashcardsContent() {
                         <p className="text-muted-foreground">Complete a quiz and save the results to create flashcards.</p>
                     </div>
                 ) : (
-                    <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+                    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                         {sets.map((set) => (
-                            <Card key={set.id} className="cursor-pointer hover:border-primary/50 transition-colors" onClick={() => startReview(set)}>
-                                <CardHeader>
-                                    <CardTitle>{set.topic}</CardTitle>
-                                    <CardDescription>{new Date(set.date).toLocaleDateString()}</CardDescription>
-                                </CardHeader>
-                                <CardContent>
-                                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                                        <Layers className="h-4 w-4" />
-                                        {set.cards.length} Cards
+                            <Card
+                                key={set.id}
+                                className="cursor-pointer hover:border-primary/50 hover:shadow-md transition-all group"
+                                onClick={() => startReview(set)}
+                            >
+                                <CardHeader className="pb-3">
+                                    <div className="flex items-start justify-between gap-2">
+                                        <CardTitle className="text-base leading-snug">{set.topic}</CardTitle>
+                                        <span className="shrink-0 text-xs font-medium bg-primary/10 text-primary px-2 py-0.5 rounded-full">
+                                            {set.cards.length} cards
+                                        </span>
                                     </div>
-                                    <Button className="w-full mt-4" variant="secondary">
-                                        Review Deck <Play className="ml-2 h-4 w-4" />
+                                    <CardDescription className="text-xs">
+                                        Saved {new Date(set.date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                                    </CardDescription>
+                                </CardHeader>
+                                <CardContent className="pb-4 space-y-3">
+                                    {/* Preview first 2 card fronts */}
+                                    <div className="space-y-1.5">
+                                        {set.cards.slice(0, 2).map((card: any, i: number) => (
+                                            <div key={i} className="text-xs text-muted-foreground bg-muted/50 rounded px-2.5 py-1.5 truncate border">
+                                                {card.front.replace(/```[\s\S]*?```/g, "[code]").substring(0, 70)}
+                                                {card.front.length > 70 ? "…" : ""}
+                                            </div>
+                                        ))}
+                                        {set.cards.length > 2 && (
+                                            <p className="text-xs text-muted-foreground pl-1">+ {set.cards.length - 2} more questions</p>
+                                        )}
+                                    </div>
+                                    <Button className="w-full" variant="secondary" size="sm">
+                                        Review Deck <Play className="ml-2 h-3 w-3" />
                                     </Button>
                                 </CardContent>
                             </Card>

@@ -82,7 +82,19 @@ export default function ChatPage() {
     }
 
     const handleCopy = (content: string) => {
-        navigator.clipboard.writeText(content)
+        if (navigator.clipboard?.writeText) {
+            navigator.clipboard.writeText(content)
+        } else {
+            const el = document.createElement("textarea")
+            el.value = content
+            el.style.position = "fixed"
+            el.style.opacity = "0"
+            document.body.appendChild(el)
+            el.focus()
+            el.select()
+            document.execCommand("copy")
+            document.body.removeChild(el)
+        }
         toast.success("Copied to clipboard")
     }
 

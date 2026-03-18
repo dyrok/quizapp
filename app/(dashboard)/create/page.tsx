@@ -9,11 +9,60 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea"
 import { Slider } from "@/components/ui/slider"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Sparkles, Loader2, FileText, Wand2 } from "lucide-react"
+import { Sparkles, Loader2, FileText, Wand2, Braces, Copy, Check, AlertCircle, CheckCircle2 } from "lucide-react"
 import { toast } from "sonner"
 import { useRouter } from "next/navigation"
 import { generateQuizAction } from "@/lib/gemini"
 import { saveQuizToDB, generateQuizFromPDF } from "@/lib/actions"
+
+const JSON_SCHEMA_PROMPT = `You are a quiz generator. Output ONLY valid JSON with no extra text, no markdown fences, no explanations.
+
+The JSON must follow this exact structure:
+
+{
+  "title": "Quiz title here",
+  "topic": "Topic name here",
+  "emoji": "📝",
+  "questions": [
+    {
+      "id": 1,
+      "question": "Your question text here. Use markdown code blocks for code snippets.",
+      "options": ["Option A", "Option B", "Option C", "Option D"],
+      "answer": "Option A",
+      "explanation": "Brief explanation of why this answer is correct."
+    }
+  ]
+}
+
+Rules:
+- "answer" must exactly match one of the strings in "options"
+- "id" must be a sequential integer starting from 1
+- "options" must have exactly 4 items
+- "emoji" should represent the topic (e.g. "⚛️" for Physics, "🧬" for Biology)
+- For code questions, use markdown fenced code blocks inside the "question" string
+- Output ONLY the JSON object, nothing else`
+
+const EXAMPLE_JSON = `{
+  "title": "JavaScript Basics",
+  "topic": "JavaScript",
+  "emoji": "🟨",
+  "questions": [
+    {
+      "id": 1,
+      "question": "What does \`typeof null\` return in JavaScript?",
+      "options": ["null", "undefined", "object", "boolean"],
+      "answer": "object",
+      "explanation": "This is a historical bug in JavaScript — typeof null returns 'object' even though null is not an object."
+    },
+    {
+      "id": 2,
+      "question": "Which keyword declares a block-scoped variable?",
+      "options": ["var", "let", "function", "const"],
+      "answer": "let",
+      "explanation": "let and const are block-scoped. var is function-scoped."
+    }
+  ]
+}`
 
 export default function CreateQuizPage() {
     const router = useRouter()
@@ -29,6 +78,64 @@ export default function CreateQuizPage() {
     const [difficulty, setDifficulty] = useState("medium")
     const [count, setCount] = useState([10])
 
+    // JSON Import State
+    const [jsonInput, setJsonInput] = useState("")
+    const [jsonError, setJsonError] = useState<string | null>(null)
+    const [jsonValid, setJsonValid] = useState(false)
+    const [promptCopied, setPromptCopied] = useState(false)
+
+    const validateJson = (value: string) => {
+        setJsonInput(value)
+        setJsonError(null)
+        setJsonValid(false)
+        if (!value.trim()) return
+
+        try {
+            const parsed = JSON.parse(value)
+
+            if (!parsed.questions || !Array.isArray(parsed.questions)) {
+                setJsonError('Missing "questions" array.')
+                return
+            }
+            if (parsed.questions.length === 0) {
+                setJsonError('"questions" array is empty.')
+                return
+            }
+
+            for (let i = 0; i < parsed.questions.length; i++) {
+                const q = parsed.questions[i]
+                if (!q.question) { setJsonError(`Question ${i + 1}: missing "question" field.`); return }
+                if (!Array.isArray(q.options) || q.options.length !== 4) { setJsonError(`Question ${i + 1}: "options" must be an array of 4 strings.`); return }
+                if (!q.answer) { setJsonError(`Question ${i + 1}: missing "answer" field.`); return }
+                if (!q.options.includes(q.answer)) { setJsonError(`Question ${i + 1}: "answer" must exactly match one of the options.\nGot: "${q.answer}"\nOptions: ${JSON.stringify(q.options)}`); return }
+            }
+
+            setJsonValid(true)
+        } catch (e: any) {
+            setJsonError(`Invalid JSON: ${e.message}`)
+        }
+    }
+
+    const copyPrompt = () => {
+        if (navigator.clipboard?.writeText) {
+            navigator.clipboard.writeText(JSON_SCHEMA_PROMPT)
+        } else {
+            // Fallback for non-secure contexts
+            const el = document.createElement("textarea")
+            el.value = JSON_SCHEMA_PROMPT
+            el.style.position = "fixed"
+            el.style.opacity = "0"
+            document.body.appendChild(el)
+            el.focus()
+            el.select()
+            document.execCommand("copy")
+            document.body.removeChild(el)
+        }
+        setPromptCopied(true)
+        toast.success("Prompt copied! Paste it into any AI to generate questions.")
+        setTimeout(() => setPromptCopied(false), 3000)
+    }
+
     const handleAction = async () => {
         setLoading(true)
 
@@ -39,71 +146,102 @@ export default function CreateQuizPage() {
         try {
             if (activeTab === 'upload') {
                 if (!file) {
-                    toast.error("Please select a PDF file.");
-                    setLoading(false);
-                    return;
+                    toast.error("Please select a PDF file.")
+                    setLoading(false)
+                    return
                 }
-
-                const formData = new FormData();
-                formData.append("pdf", file);
-
-                // Static import used instead of dynamic
-                generatedResult = await generateQuizFromPDF(formData);
-
-                quizTitle = file.name.replace(".pdf", "");
+                const formData = new FormData()
+                formData.append("pdf", file)
+                generatedResult = await generateQuizFromPDF(formData)
+                quizTitle = file.name.replace(".pdf", "")
 
             } else if (activeTab === 'parse') {
                 if (!parseText) {
-                    toast.error("Please paste some text to analyze.");
-                    setLoading(false);
-                    return;
+                    toast.error("Please paste some text to analyze.")
+                    setLoading(false)
+                    return
                 }
-                textToAnalyze = parseText;
-                quizTitle = "Notes Analysis"; // Default title for parsed text
+                textToAnalyze = parseText
+                quizTitle = "Notes Analysis"
+
+            } else if (activeTab === 'json') {
+                if (!jsonInput.trim()) {
+                    toast.error("Please paste your JSON.")
+                    setLoading(false)
+                    return
+                }
+                if (!jsonValid) {
+                    toast.error("Fix the JSON errors before importing.")
+                    setLoading(false)
+                    return
+                }
+
+                const parsed = JSON.parse(jsonInput)
+                const questions = parsed.questions.map((q: any, i: number) => ({
+                    id: i + 1,
+                    question: q.question,
+                    options: q.options,
+                    answer: q.answer,
+                    explanation: q.explanation || "",
+                }))
+
+                await saveQuizToDB({
+                    title: parsed.title || "Imported Quiz",
+                    topic: parsed.topic || "Imported Content",
+                    emoji: parsed.emoji || "📝",
+                    difficulty: "medium",
+                    questions,
+                })
+
+                toast.success("Quiz imported successfully!")
+                router.push("/quizzes")
+                return
+
             } else {
                 if (!topic) {
-                    toast.error("Please enter a topic.");
-                    setLoading(false);
-                    return;
+                    toast.error("Please enter a topic.")
+                    setLoading(false)
+                    return
                 }
-                // Synthesize a prompt 
-                textToAnalyze = `Generate a ${difficulty} difficulty quiz about ${topic} with ${count[0]} questions.`;
-                quizTitle = topic;
+                textToAnalyze = `Generate a ${difficulty} difficulty quiz about ${topic} with ${count[0]} questions.`
+                quizTitle = topic
             }
 
-            console.log("Generating quiz...");
-
-            // If not PDF (already generated), use standard generation
             if (!generatedResult) {
-                generatedResult = await generateQuizAction(textToAnalyze);
+                generatedResult = await generateQuizAction(textToAnalyze)
             }
 
-            const { emoji, questions } = generatedResult;
+            const { emoji, questions } = generatedResult
 
             if (!questions || questions.length === 0) {
-                throw new Error("No questions generated.");
+                throw new Error("No questions generated.")
             }
 
-            // --- SAVE TO MONGODB ---
-            const savedQuiz = await saveQuizToDB({
+            await saveQuizToDB({
                 title: quizTitle,
                 topic: activeTab === 'generate' ? topic : 'Imported Content',
-                emoji: emoji,
-                difficulty: difficulty,
-                questions: questions,
-            });
+                emoji,
+                difficulty,
+                questions,
+            })
 
-            toast.success(`Success! Quiz added to your library.`);
-
-            // Navigate to Quiz List
-            router.push(`/quizzes`)
+            toast.success("Quiz added to your library!")
+            router.push("/quizzes")
 
         } catch (error: any) {
-            console.error(error);
-            toast.error(error.message || "Failed to generate quiz. Try again.");
+            console.error(error)
+            toast.error(error.message || "Failed to generate quiz. Try again.")
         } finally {
-            setLoading(false);
+            setLoading(false)
         }
+    }
+
+    const getButtonLabel = () => {
+        if (loading) return activeTab === 'generate' ? 'Generating Quiz...' : activeTab === 'json' ? 'Importing...' : 'Analyzing Document...'
+        if (activeTab === 'upload') return 'Generate from PDF'
+        if (activeTab === 'parse') return 'Generate Quiz from Text'
+        if (activeTab === 'json') return 'Import Quiz from JSON'
+        return 'Generate Quiz'
     }
 
     return (
@@ -115,23 +253,27 @@ export default function CreateQuizPage() {
                         Create New Quiz
                     </CardTitle>
                     <CardDescription>
-                        Use AI to master any subject. Parse notes, upload PDFs, or generate from scratch.
+                        Use AI to master any subject. Parse notes, upload PDFs, generate from scratch, or import JSON.
                     </CardDescription>
                 </CardHeader>
                 <CardContent>
-                    <Tabs defaultValue="upload" value={activeTab} onValueChange={setActiveTab} className="w-full">
-                        <TabsList className="grid w-full grid-cols-3 mb-6 h-12">
-                            <TabsTrigger value="upload" className="text-base">
-                                <FileText className="mr-2 h-4 w-4" />
-                                Upload PDF
+                    <Tabs defaultValue="parse" value={activeTab} onValueChange={setActiveTab} className="w-full">
+                        <TabsList className="grid w-full grid-cols-4 mb-6 h-11">
+                            <TabsTrigger value="upload" className="text-sm">
+                                <FileText className="mr-1.5 h-3.5 w-3.5" />
+                                PDF
                             </TabsTrigger>
-                            <TabsTrigger value="parse" className="text-base">
-                                <FileText className="mr-2 h-4 w-4" />
-                                Paste Text
+                            <TabsTrigger value="parse" className="text-sm">
+                                <FileText className="mr-1.5 h-3.5 w-3.5" />
+                                Text
                             </TabsTrigger>
-                            <TabsTrigger value="generate" className="text-base">
-                                <Wand2 className="mr-2 h-4 w-4" />
-                                AI Generate
+                            <TabsTrigger value="generate" className="text-sm">
+                                <Wand2 className="mr-1.5 h-3.5 w-3.5" />
+                                AI
+                            </TabsTrigger>
+                            <TabsTrigger value="json" className="text-sm">
+                                <Braces className="mr-1.5 h-3.5 w-3.5" />
+                                JSON
                             </TabsTrigger>
                         </TabsList>
 
@@ -219,24 +361,85 @@ export default function CreateQuizPage() {
                                 </div>
                             </div>
                         </TabsContent>
+
+                        <TabsContent value="json" className="space-y-4">
+                            {/* Copy Prompt Banner */}
+                            <div className="rounded-lg border border-primary/20 bg-primary/5 p-4 space-y-2">
+                                <div className="flex items-start justify-between gap-3">
+                                    <div>
+                                        <p className="text-sm font-semibold">Use any AI to generate questions</p>
+                                        <p className="text-xs text-muted-foreground mt-0.5">
+                                            Copy this prompt → paste into ChatGPT, Claude, Gemini, etc. → paste the output below.
+                                        </p>
+                                    </div>
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        className="shrink-0 gap-1.5 border-primary/30 hover:bg-primary/10"
+                                        onClick={copyPrompt}
+                                    >
+                                        {promptCopied ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5" />}
+                                        {promptCopied ? "Copied!" : "Copy Prompt"}
+                                    </Button>
+                                </div>
+                                <div className="rounded bg-muted/60 px-3 py-2 font-mono text-[10px] text-muted-foreground leading-relaxed line-clamp-3 border">
+                                    You are a quiz generator. Output ONLY valid JSON with no extra text... "questions": [{"{"}  "id": 1, "question": "...", "options": [...], "answer": "...", "explanation": "..." {"}"}]
+                                </div>
+                            </div>
+
+                            {/* JSON Input */}
+                            <div className="space-y-2">
+                                <div className="flex items-center justify-between">
+                                    <Label htmlFor="jsonInput" className="text-sm font-medium">Paste JSON Output</Label>
+                                    {jsonInput.trim() && (
+                                        <span className={`text-xs flex items-center gap-1 ${jsonValid ? "text-green-500" : "text-destructive"}`}>
+                                            {jsonValid
+                                                ? <><CheckCircle2 className="h-3 w-3" /> Valid JSON</>
+                                                : <><AlertCircle className="h-3 w-3" /> Invalid</>
+                                            }
+                                        </span>
+                                    )}
+                                </div>
+                                <Textarea
+                                    id="jsonInput"
+                                    placeholder={EXAMPLE_JSON}
+                                    className={`min-h-[260px] font-mono text-xs bg-muted/30 focus:bg-background transition-colors ${jsonError ? "border-destructive focus-visible:ring-destructive" : jsonValid ? "border-green-500 focus-visible:ring-green-500" : ""}`}
+                                    value={jsonInput}
+                                    onChange={(e) => validateJson(e.target.value)}
+                                    spellCheck={false}
+                                />
+                                {jsonError && (
+                                    <div className="flex items-start gap-2 text-xs text-destructive bg-destructive/10 rounded-md px-3 py-2 border border-destructive/20">
+                                        <AlertCircle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+                                        <pre className="whitespace-pre-wrap font-mono">{jsonError}</pre>
+                                    </div>
+                                )}
+                                {jsonValid && (() => {
+                                    const parsed = JSON.parse(jsonInput)
+                                    return (
+                                        <div className="flex items-center gap-2 text-xs text-green-600 dark:text-green-400 bg-green-500/10 rounded-md px-3 py-2 border border-green-500/20">
+                                            <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+                                            {parsed.questions.length} question{parsed.questions.length !== 1 ? "s" : ""} ready to import
+                                            {parsed.title ? ` · "${parsed.title}"` : ""}
+                                        </div>
+                                    )
+                                })()}
+                            </div>
+                        </TabsContent>
                     </Tabs>
                 </CardContent>
                 <CardFooter>
                     <Button
                         className="w-full h-12 text-lg font-medium shadow-lg shadow-primary/20"
                         onClick={handleAction}
-                        disabled={loading}
+                        disabled={loading || (activeTab === 'json' && !!jsonInput.trim() && !jsonValid)}
                     >
                         {loading ? (
                             <>
                                 <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                                {activeTab === 'generate' ? 'Generating Quiz...' : 'Analyzing Document...'}
+                                {getButtonLabel()}
                             </>
-                        ) : (
-                            <>
-                                {activeTab === 'upload' ? 'Generate from PDF' : activeTab === 'parse' ? 'Generate Quiz from Text' : 'Generate Quiz'}
-                            </>
-                        )}
+                        ) : getButtonLabel()}
                     </Button>
                 </CardFooter>
             </Card>

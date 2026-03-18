@@ -153,7 +153,6 @@ export default function QuizPlayPage({ params }: { params: Promise<{ id: string 
                     setFlashcardQueue(prev => [...prev, {
                         front: currentQ.question,
                         back: currentQ.answer,
-                        topic: "Incorrect Answer"
                     }])
                 }
             }
